@@ -80,64 +80,52 @@ variable "rds_monitoring_role_arn" {
 }
 
 # ============================================================================
-# Variables de RDS PostgreSQL
+# Variables de Aurora PostgreSQL
 # ============================================================================
 
-variable "rds_instance_class" {
-  description = "Clase de instancia para RDS PostgreSQL"
+variable "aurora_engine_version" {
+  description = "Versión del motor Aurora PostgreSQL"
   type        = string
-  default     = "db.t4g.micro"
+  default     = "16.4"
 }
 
-variable "rds_allocated_storage" {
-  description = "Almacenamiento asignado en GB para RDS"
+variable "aurora_serverless_min_capacity" {
+  description = "Capacidad mínima de ACU para Aurora Serverless v2"
   type        = number
-  default     = 20
+  default     = 0.5
 }
 
-variable "rds_max_allocated_storage" {
-  description = "Almacenamiento máximo para autoscaling en GB"
+variable "aurora_serverless_max_capacity" {
+  description = "Capacidad máxima de ACU para Aurora Serverless v2"
   type        = number
-  default     = 100
+  default     = 1.0
 }
 
-variable "rds_engine_version" {
-  description = "Versión del motor PostgreSQL"
-  type        = string
-  default     = "16.3"
-}
-
-variable "rds_multi_az" {
-  description = "Habilitar Multi-AZ para RDS"
-  type        = bool
-  default     = false
-}
-
-variable "rds_backup_retention_period" {
+variable "aurora_backup_retention_period" {
   description = "Días de retención de backups"
   type        = number
   default     = 7
 }
 
-variable "rds_backup_window" {
+variable "aurora_backup_window" {
   description = "Ventana de backup (UTC)"
   type        = string
   default     = "03:00-04:00"
 }
 
-variable "rds_maintenance_window" {
+variable "aurora_maintenance_window" {
   description = "Ventana de mantenimiento (UTC)"
   type        = string
   default     = "mon:04:00-mon:05:00"
 }
 
-variable "rds_deletion_protection" {
+variable "aurora_deletion_protection" {
   description = "Habilitar protección contra eliminación"
   type        = bool
   default     = true
 }
 
-variable "rds_skip_final_snapshot" {
+variable "aurora_skip_final_snapshot" {
   description = "Omitir snapshot final al eliminar"
   type        = bool
   default     = false

@@ -1,24 +1,25 @@
-# Data Infrastructure - Terraform Module
+# Data Infrastructure - Aurora PostgreSQL Serverless v2
 
-Este módulo de Terraform implementa la capa de datos de la aplicación, incluyendo base de datos relacional, caché en memoria y almacenamiento de objetos, siguiendo las mejores prácticas de seguridad y las reglas PC-IAC de Pragma CloudOps.
+Este módulo de Terraform implementa la capa de datos de la aplicación con Aurora PostgreSQL Serverless v2, caché en memoria y almacenamiento de objetos, siguiendo las mejores prácticas de seguridad y las reglas PC-IAC de Pragma CloudOps.
 
 ## Descripción
 
 El módulo despliega una arquitectura de datos completa que incluye:
 
-### Base de Datos Relacional
-- 1 RDS PostgreSQL con capacidad mínima (db.t4g.micro)
-- Multi-AZ configurable por variable
+### Aurora PostgreSQL Serverless v2 (Cluster Multi-AZ)
+- 1 Cluster Aurora PostgreSQL con 2 instancias Serverless v2
+- **Writer Instance (AZ-a)**: Instancia principal para operaciones de escritura
+- **Reader Instance (AZ-b)**: Réplica de lectura para balanceo de carga
+- Escalabilidad automática (0.5 - 1.0 ACU configurable)
 - Enhanced Monitoring habilitado (métricas cada 60 segundos)
-- Performance Insights habilitado
+- Performance Insights habilitado en ambas instancias
 - Cifrado en reposo con KMS Customer Managed Key
 - Backups automáticos con retención configurable
-- Logs exportados a CloudWatch (postgresql, upgrade)
+- Logs exportados a CloudWatch (postgresql)
 
 ### Caché en Memoria
 - 1 ElastiCache Redis con capacidad mínima (cache.t4g.micro)
 - Cifrado en tránsito (TLS) habilitado
-- Cifrado en reposo con KMS habilitado
 - Snapshots automáticos con retención configurable
 - Logs de slow-log y engine-log en CloudWatch
 
@@ -31,68 +32,107 @@ El módulo despliega una arquitectura de datos completa que incluye:
 - Transición automática a Glacier después de 30 días
 - Logging habilitado
 
-## Arquitectura de Datos
+## Arquitectura de Aurora
 
-### Flujo de Datos
+### Configuración Multi-AZ
 
 ```
-ECS Fargate (Aplicación)
-    ↓ (lectura/escritura)
-RDS PostgreSQL (Datos relacionales)
-    ↓ (caché)
-ElastiCache Redis (Datos en memoria)
-    ↓ (eventos)
-Kinesis Data Streams
-    ↓ (procesamiento)
-Kinesis Firehose
-    ↓ (almacenamiento)
-S3 Bucket (Landing Zone)
+Aurora Cluster
+├── Writer Instance (AZ-a)
+│   ├── Endpoint: <cluster-id>.cluster-<region>.rds.amazonaws.com
+│   ├── Role: Escritura (INSERT, UPDATE, DELETE)
+│   └── Serverless v2: 0.5 - 1.0 ACU
+│
+└── Reader Instance (AZ-b)
+    ├── Endpoint: <cluster-id>.cluster-ro-<region>.rds.amazonaws.com
+    ├── Role: Lectura (SELECT)
+    └── Serverless v2: 0.5 - 1.0 ACU
 ```
 
-### Integración con Módulos Existentes
+### Endpoints de Conexión
 
-Este módulo se integra con:
+Aurora proporciona dos endpoints principales:
 
-1. **Módulo de Networking**: Utiliza las subnets privadas de datos (Type = "Data")
-2. **Módulo de Seguridad**: Utiliza Security Groups, KMS Key, Secrets Manager y roles IAM
+1. **Writer Endpoint (Cluster Endpoint)**: 
+   - Para operaciones de escritura y lectura
+   - Siempre apunta a la instancia Writer
+   - Failover automático en caso de falla
+
+2. **Reader Endpoint**: 
+   - Para operaciones de solo lectura
+   - Balanceo automático entre réplicas de lectura
+   - Mejora el rendimiento distribuyendo la carga
+
+### Serverless v2 Scaling
+
+Aurora Serverless v2 ajusta automáticamente la capacidad de cómputo:
+
+- **Min Capacity**: 0.5 ACU (Aurora Capacity Units)
+- **Max Capacity**: 1.0 ACU (configurable según necesidad)
+- **Escalado**: Automático basado en la carga de trabajo
+- **Costo**: Paga solo por la capacidad utilizada
+
+## Migración desde RDS Multi-AZ
+
+Este módulo reemplaza la configuración anterior de RDS PostgreSQL Multi-AZ con Aurora Serverless v2.
+
+### Ventajas de Aurora
+
+| Característica | RDS Multi-AZ | Aurora Serverless v2 |
+|----------------|--------------|----------------------|
+| Arquitectura | Instancia única con standby | Cluster con múltiples instancias |
+| Escalabilidad | Manual (cambio de instance class) | Automática (ACU scaling) |
+| Endpoints | 1 endpoint | 2 endpoints (writer/reader) |
+| Almacenamiento | EBS (gp3) | Almacenamiento distribuido |
+| Replicación | Síncrona a standby | Replicación a nivel de storage |
+| Failover | 1-2 minutos | < 30 segundos |
+| Rendimiento | PostgreSQL estándar | Hasta 3x más rápido |
+| Backups | Snapshots a S3 | Backups continuos |
+| Recuperación | Point-in-time (5 min) | Point-in-time (1 seg) |
+
+### Beneficios Clave
+
+1. **Escalabilidad automática**: Ajusta la capacidad según la carga sin intervención manual
+2. **Mejor rendimiento**: Hasta 3x más rápido que PostgreSQL estándar
+3. **Alta disponibilidad mejorada**: Failover más rápido (< 30 segundos)
+4. **Costos optimizados**: Paga solo por la capacidad utilizada
+5. **Backups continuos**: Respaldo automático a S3 sin impacto en rendimiento
+6. **Recuperación rápida**: Point-in-time recovery con granularidad de 1 segundo
 
 ## Características de Seguridad (PC-IAC-020)
 
 ### Cifrado en Reposo y en Tránsito
-- RDS PostgreSQL cifrado con KMS Customer Managed Key
-- ElastiCache Redis con cifrado en tránsito (TLS) y reposo (KMS)
+- Aurora PostgreSQL cifrado con KMS Customer Managed Key
+- ElastiCache Redis con cifrado en tránsito (TLS) y reposo
 - S3 Bucket cifrado con KMS
 - Performance Insights cifrado con KMS
 - CloudWatch Logs cifrados con KMS
 
 ### Principio de Mínimo Privilegio
-- Security Groups específicos para bases de datos (desde módulo de seguridad)
-- Credenciales almacenadas en Secrets Manager (no hardcoded)
+- Security Groups específicos para bases de datos
+- Credenciales almacenadas en Secrets Manager
 - Roles IAM con permisos mínimos necesarios
 
 ### Privacidad de Red
-- Todos los recursos en subnets privadas (sin acceso directo a Internet)
-- Acceso a través de VPC Endpoints configurados en módulo de networking
-- Bloqueo total de acceso público en S3
+- Todas las instancias en subnets privadas
+- Sin acceso público habilitado
+- Acceso a través de VPC Endpoints
 
 ### Observabilidad
-- Enhanced Monitoring en RDS (métricas cada 60 segundos)
-- Performance Insights en RDS (retención de 7 días)
+- Enhanced Monitoring en ambas instancias (60s)
+- Performance Insights en ambas instancias (7 días)
 - Logs de PostgreSQL exportados a CloudWatch
-- Logs de Redis (slow-log y engine-log) en CloudWatch
-- Logging de acceso a S3
+- Logs de Redis en CloudWatch
 
 ### Alta Disponibilidad
-- Multi-AZ configurable para RDS PostgreSQL
+- Writer en AZ-a, Reader en AZ-b
+- Failover automático en caso de falla
 - Backups automáticos con retención de 7 días
-- Snapshots de Redis con retención de 5 días
-- Versionado habilitado en S3
+- Replicación automática entre AZs
 
 ## Uso
 
 ### Opción 1: Detección Automática (Recomendado)
-
-El módulo puede detectar automáticamente los recursos de red y seguridad usando los tags de gobernanza:
 
 ```hcl
 module "data_infrastructure" {
@@ -100,17 +140,16 @@ module "data_infrastructure" {
 
   # Variables de gobernanza (requeridas)
   client      = "pragma"
-  project     = "myproject"
+  project     = "Assesment"
   environment = "dev"
   region      = "us-east-1"
 
-  # Variables de red y seguridad: NO es necesario especificarlas
-  # El módulo las buscará automáticamente por tags
-
-  # Configuración de RDS PostgreSQL
-  rds_instance_class          = "db.t4g.micro"
-  rds_multi_az                = false  # true para producción
-  rds_backup_retention_period = 7
+  # Configuración de Aurora PostgreSQL Serverless v2
+  aurora_engine_version          = "16.4"
+  aurora_serverless_min_capacity = 0.5
+  aurora_serverless_max_capacity = 1.0
+  aurora_backup_retention_period = 7
+  aurora_deletion_protection     = true
 
   # Configuración de ElastiCache Redis
   elasticache_node_type       = "cache.t4g.micro"
@@ -129,15 +168,13 @@ module "data_infrastructure" {
 
 ### Opción 2: Especificación Manual
 
-Si prefieres especificar manualmente los valores:
-
 ```hcl
 module "data_infrastructure" {
   source = "./data-infrastructure"
 
   # Variables de gobernanza
   client      = "pragma"
-  project     = "myproject"
+  project     = "Assesment"
   environment = "dev"
   region      = "us-east-1"
 
@@ -163,84 +200,69 @@ module "data_infrastructure" {
 | project | Nombre del proyecto (máx 15 caracteres) | string | - | Sí |
 | environment | Ambiente de despliegue (dev, qa, pdn) | string | - | Sí |
 | region | Región de AWS | string | "us-east-1" | No |
-| vpc_id | ID de la VPC. Si no se proporciona, se busca automáticamente | string | "" | No |
-| data_subnet_ids | IDs de las subnets de datos. Si no se proporciona, se buscan automáticamente | list(string) | [] | No |
-| sg_db_id | ID del Security Group de base de datos. Si no se proporciona, se busca automáticamente | string | "" | No |
-| kms_key_arn | ARN de la llave KMS. Si no se proporciona, se busca automáticamente | string | "" | No |
-| db_secret_arn | ARN del secreto de credenciales. Si no se proporciona, se busca automáticamente | string | "" | No |
-| rds_monitoring_role_arn | ARN del rol de monitoreo de RDS. Si no se proporciona, se busca automáticamente | string | "" | No |
-| rds_instance_class | Clase de instancia para RDS | string | "db.t4g.micro" | No |
-| rds_allocated_storage | Almacenamiento asignado en GB | number | 20 | No |
-| rds_max_allocated_storage | Almacenamiento máximo para autoscaling | number | 100 | No |
-| rds_engine_version | Versión del motor PostgreSQL | string | "16.3" | No |
-| rds_multi_az | Habilitar Multi-AZ | bool | false | No |
-| rds_backup_retention_period | Días de retención de backups | number | 7 | No |
-| rds_deletion_protection | Protección contra eliminación | bool | true | No |
-| elasticache_node_type | Tipo de nodo para Redis | string | "cache.t4g.micro" | No |
-| elasticache_num_cache_nodes | Número de nodos de caché | number | 1 | No |
-| elasticache_engine_version | Versión del motor Redis | string | "7.1" | No |
-| s3_retention_days | Días de retención en S3 | number | 90 | No |
-| s3_enable_versioning | Habilitar versionado en S3 | bool | true | No |
-| s3_glacier_transition_days | Días antes de transición a Glacier | number | 30 | No |
-| additional_tags | Tags adicionales | map(string) | {} | No |
+| aurora_engine_version | Versión del motor Aurora PostgreSQL | string | "16.4" | No |
+| aurora_serverless_min_capacity | Capacidad mínima de ACU | number | 0.5 | No |
+| aurora_serverless_max_capacity | Capacidad máxima de ACU | number | 1.0 | No |
+| aurora_backup_retention_period | Días de retención de backups | number | 7 | No |
+| aurora_deletion_protection | Protección contra eliminación | bool | true | No |
 
 ## Outputs
 
 | Nombre | Descripción |
 |--------|-------------|
-| rds_instance_id | ID de la instancia RDS PostgreSQL |
-| rds_endpoint | Endpoint de conexión de RDS |
-| rds_address | Dirección DNS de RDS |
-| rds_port | Puerto de RDS |
-| rds_database_name | Nombre de la base de datos |
-| elasticache_cluster_id | ID del cluster ElastiCache Redis |
-| elasticache_endpoint | Endpoint de conexión de Redis |
-| elasticache_port | Puerto de Redis |
-| s3_bucket_id | ID del bucket S3 Landing Zone |
-| s3_bucket_arn | ARN del bucket S3 |
-| vpc_id | ID de la VPC utilizada |
-| data_subnet_ids | IDs de las subnets de datos utilizadas |
-| security_group_id | ID del Security Group utilizado |
-| kms_key_arn | ARN de la llave KMS utilizada |
-| data_infrastructure_summary | Resumen completo de la infraestructura creada |
+| aurora_cluster_endpoint | Endpoint de escritura (Writer) |
+| aurora_reader_endpoint | Endpoint de lectura (Reader) |
+| aurora_writer_instance_endpoint | Endpoint específico de la instancia Writer |
+| aurora_reader_instance_endpoint | Endpoint específico de la instancia Reader |
+| aurora_cluster_id | ID del cluster Aurora |
+| aurora_cluster_port | Puerto del cluster (5432) |
+| aurora_database_name | Nombre de la base de datos |
+| data_infrastructure_summary | Resumen completo de la infraestructura |
+
+## Conexión a Aurora
+
+### Usando Writer Endpoint (Escritura)
+
+```bash
+# Obtener credenciales desde Secrets Manager
+aws secretsmanager get-secret-value \
+  --secret-id pragma-Assesment-dev-db-credentials \
+  --query SecretString \
+  --output text | jq -r
+
+# Conectar al Writer para operaciones de escritura
+psql -h <aurora_cluster_endpoint> -U <username> -d <database_name>
+```
+
+### Usando Reader Endpoint (Lectura)
+
+```bash
+# Conectar al Reader para operaciones de solo lectura
+psql -h <aurora_reader_endpoint> -U <username> -d <database_name>
+```
+
+### Mejores Prácticas de Conexión
+
+1. **Escritura**: Usa el Writer Endpoint para INSERT, UPDATE, DELETE
+2. **Lectura**: Usa el Reader Endpoint para SELECT y reportes
+3. **Balanceo**: El Reader Endpoint distribuye automáticamente la carga
+4. **Failover**: El Writer Endpoint maneja automáticamente el failover
 
 ## Requisitos
 
 - Terraform >= 1.5.0
 - AWS Provider ~> 5.0
 - Credenciales de AWS configuradas
-- Módulo de networking desplegado previamente (con subnets Type = "Data")
-- Módulo de seguridad desplegado previamente (con Security Groups, KMS, Secrets Manager)
+- Módulo de networking desplegado (con subnets Type = "Data" en 2 AZs)
+- Módulo de seguridad desplegado (Security Groups, KMS, Secrets Manager)
 
 ### Requisitos para Detección Automática
 
-Para que el módulo pueda detectar automáticamente los recursos, deben existir con los siguientes tags:
-
-**VPC:**
-- `Client` = valor de var.client
-- `Project` = valor de var.project
-- `Environment` = valor de var.environment
-
-**Subnets de Datos:**
-- `Client` = valor de var.client
-- `Project` = valor de var.project
-- `Environment` = valor de var.environment
-- `Type` = "Data"
-
-**Security Group de Base de Datos:**
-- `Client` = valor de var.client
-- `Project` = valor de var.project
-- `Environment` = valor de var.environment
-- `Name` = "{client}-{project}-{environment}-sg-db"
-
-**KMS Key:**
-- Alias: `alias/{client}-{project}-{environment}-key`
-
-**Secret de Base de Datos:**
-- Name: `{client}-{project}-{environment}-db-credentials`
-
-**Rol de Monitoreo de RDS:**
-- Name: `{client}-{project}-{environment}-rds-monitoring-role`
+**Subnets de Datos (IMPORTANTE):**
+- Deben existir al menos 2 subnets con tag `Type = "Data"`
+- Primera subnet (AZ-a): Para la instancia Writer
+- Segunda subnet (AZ-b): Para la instancia Reader
+- Tags requeridos: `Client`, `Project`, `Environment`, `Type = "Data"`
 
 ## Cumplimiento de Reglas PC-IAC
 
@@ -249,124 +271,59 @@ Para que el módulo pueda detectar automáticamente los recursos, deben existir 
 | PC-IAC-002 | Variables de Gobernanza | Variables client, project, environment con validaciones |
 | PC-IAC-003 | Nomenclatura Estándar | Prefijo de gobernanza en todos los recursos |
 | PC-IAC-004 | Etiquetas Obligatorias | Tags comunes aplicados mediante merge |
-| PC-IAC-010 | For_Each y Control | Uso de for_each para recursos múltiples |
 | PC-IAC-020 | Seguridad (Hardenizado) | Cifrado, mínimo privilegio, Enhanced Monitoring, bloqueo público |
-
-## Decisiones de Diseño
-
-### Capacidad Mínima
-Se utilizan las instancias más pequeñas disponibles en AWS:
-- RDS: `db.t4g.micro` (2 vCPU, 1 GB RAM)
-- ElastiCache: `cache.t4g.micro` (2 vCPU, 0.5 GB RAM)
-
-Estas instancias son ideales para desarrollo y pruebas. Para producción, se recomienda escalar según las necesidades.
-
-### Multi-AZ Configurable
-Multi-AZ está deshabilitado por defecto para reducir costos en desarrollo. Para producción, se recomienda habilitarlo mediante la variable `rds_multi_az = true`.
-
-### Enhanced Monitoring
-Se habilita Enhanced Monitoring con intervalo de 60 segundos para tener visibilidad detallada del rendimiento de RDS, cumpliendo con PC-IAC-020.
-
-### Cifrado Obligatorio
-Todos los recursos de almacenamiento utilizan cifrado con KMS Customer Managed Key:
-- RDS PostgreSQL (datos y Performance Insights)
-- ElastiCache Redis (en tránsito y reposo)
-- S3 Bucket
-- CloudWatch Logs
-
-### Retención de Datos
-- Backups de RDS: 7 días (configurable)
-- Snapshots de Redis: 5 días (configurable)
-- Objetos en S3: 90 días con transición a Glacier a los 30 días
-- Performance Insights: 7 días
-- CloudWatch Logs: 7 días
-
-### Detección Automática de Recursos
-El módulo utiliza data sources para buscar automáticamente los recursos de red y seguridad basándose en los tags de gobernanza, eliminando la necesidad de hardcodear IDs y facilitando la integración entre módulos.
-
-## Conexión a los Recursos
-
-### RDS PostgreSQL
-
-```bash
-# Obtener credenciales desde Secrets Manager
-aws secretsmanager get-secret-value \
-  --secret-id pragma-myproject-dev-db-credentials \
-  --query SecretString \
-  --output text | jq -r
-
-# Conectar usando psql
-psql -h <rds_endpoint> -U <username> -d <database_name>
-```
-
-### ElastiCache Redis
-
-```bash
-# Conectar usando redis-cli (requiere TLS)
-redis-cli -h <elasticache_endpoint> -p 6379 --tls
-```
-
-### S3 Bucket
-
-```bash
-# Listar objetos
-aws s3 ls s3://pragma-myproject-dev-landing-zone/
-
-# Copiar archivo
-aws s3 cp file.txt s3://pragma-myproject-dev-landing-zone/
-```
 
 ## Monitoreo y Observabilidad
 
 ### CloudWatch Logs
 
-- RDS PostgreSQL: `/aws/rds/instance/{identifier}/postgresql`
+- Aurora PostgreSQL: `/aws/rds/cluster/{cluster_id}/postgresql`
 - Redis Slow Log: `/aws/elasticache/{cluster_id}/slow-log`
 - Redis Engine Log: `/aws/elasticache/{cluster_id}/engine-log`
 
 ### CloudWatch Metrics
 
-- RDS: CPU, memoria, IOPS, conexiones, latencia
-- ElastiCache: CPU, memoria, conexiones, comandos, evictions
-- S3: Requests, bytes, errors
+- Aurora: CPU, memoria, conexiones, latencia, throughput
+- Métricas por instancia (Writer y Reader)
+- ElastiCache: CPU, memoria, conexiones, comandos
 
 ### Performance Insights
 
-Accede a Performance Insights desde la consola de RDS para análisis detallado de queries y rendimiento.
+- Habilitado en ambas instancias (Writer y Reader)
+- Retención de 7 días
+- Análisis detallado de queries
+- Identificación de cuellos de botella
 
 ## Costos Estimados (us-east-1)
 
-### Desarrollo (configuración mínima)
-- RDS db.t4g.micro: ~$12/mes
-- ElastiCache cache.t4g.micro: ~$11/mes
-- S3 (100 GB): ~$2.30/mes
-- Total aproximado: ~$25/mes
+### Aurora Serverless v2
+- ACU-hora: $0.12 por ACU
+- Configuración mínima (0.5 ACU x 2 instancias): ~$18/mes
+- Almacenamiento: $0.10 por GB-mes
+- I/O: $0.20 por millón de requests
+- Backups: Gratis hasta 100% del tamaño del cluster
 
-### Producción (Multi-AZ, mayor capacidad)
-- RDS db.t4g.small Multi-AZ: ~$50/mes
-- ElastiCache cache.t4g.small: ~$22/mes
-- S3 (1 TB): ~$23/mes
-- Total aproximado: ~$95/mes
+### Comparación con RDS Multi-AZ
+- RDS db.t4g.micro Multi-AZ: ~$24/mes (fijo)
+- Aurora Serverless v2 (0.5-1.0 ACU): ~$18-36/mes (variable según uso)
 
-*Nota: Los costos no incluyen transferencia de datos, backups adicionales ni otros servicios.*
+*Nota: Aurora puede ser más económico en cargas variables y más costoso en cargas constantes.*
 
-## Seguridad Adicional
-
-### Rotación de Secretos
-Configura rotación automática del secreto de base de datos después del despliegue:
+## Despliegue
 
 ```bash
-aws secretsmanager rotate-secret \
-  --secret-id pragma-myproject-dev-db-credentials \
-  --rotation-lambda-arn <lambda_arn> \
-  --rotation-rules AutomaticallyAfterDays=30
+# Inicializar Terraform
+terraform init
+
+# Planificar cambios
+terraform plan -out=tfplan
+
+# Aplicar cambios
+terraform apply tfplan
+
+# Ver outputs
+terraform output
 ```
-
-### Auditoría de Acceso
-Revisa los logs de CloudWatch regularmente para detectar patrones anómalos de acceso.
-
-### Backups y Recuperación
-Prueba regularmente la restauración desde backups para garantizar la continuidad del negocio.
 
 ## Autor
 

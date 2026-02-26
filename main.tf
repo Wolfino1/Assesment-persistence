@@ -49,6 +49,16 @@ data "aws_subnets" "data" {
   }
 }
 
+# Buscar subnet de datos en AZ-a (para writer)
+data "aws_subnet" "data_az_a" {
+  id = local.data_subnet_ids[0]
+}
+
+# Buscar subnet de datos en AZ-b (para reader)
+data "aws_subnet" "data_az_b" {
+  id = local.data_subnet_ids[1]
+}
+
 # Buscar Security Group de base de datos
 data "aws_security_group" "db" {
   count = var.sg_db_id == "" ? 1 : 0
@@ -90,28 +100,28 @@ data "aws_secretsmanager_secret_version" "db_credentials" {
 }
 
 # ============================================================================
-# RDS PostgreSQL - Subnet Group
+# Aurora PostgreSQL - Subnet Group
 # ============================================================================
 
-resource "aws_db_subnet_group" "postgres" {
-  name       = local.rds_subnet_group_name
+resource "aws_db_subnet_group" "aurora" {
+  name       = local.aurora_subnet_group_name
   subnet_ids = local.data_subnet_ids
 
   tags = merge(
     local.common_tags,
     {
-      Name = local.rds_subnet_group_name
+      Name = local.aurora_subnet_group_name
     }
   )
 }
 
 # ============================================================================
-# RDS PostgreSQL - Parameter Group
+# Aurora PostgreSQL - Cluster Parameter Group
 # ============================================================================
 
-resource "aws_db_parameter_group" "postgres" {
-  name   = local.rds_parameter_group_name
-  family = "postgres16"
+resource "aws_rds_cluster_parameter_group" "aurora" {
+  name   = local.aurora_cluster_parameter_group_name
+  family = "aurora-postgresql16"
 
   # Configuraciones de seguridad y performance
   parameter {
@@ -137,74 +147,167 @@ resource "aws_db_parameter_group" "postgres" {
   tags = merge(
     local.common_tags,
     {
-      Name = local.rds_parameter_group_name
+      Name = local.aurora_cluster_parameter_group_name
     }
   )
 }
 
 # ============================================================================
-# RDS PostgreSQL - Instance (PC-IAC-020: Cifrado, Multi-AZ, Monitoring)
+# Aurora PostgreSQL - DB Parameter Group (para instancias)
 # ============================================================================
 
-resource "aws_db_instance" "postgres" {
-  identifier = local.rds_identifier
+resource "aws_db_parameter_group" "aurora" {
+  name   = local.aurora_db_parameter_group_name
+  family = "aurora-postgresql16"
+
+  tags = merge(
+    local.common_tags,
+    {
+      Name = local.aurora_db_parameter_group_name
+    }
+  )
+}
+
+# ============================================================================
+# Aurora PostgreSQL - Cluster (PC-IAC-020: Cifrado, Multi-AZ, Monitoring)
+# ============================================================================
+
+resource "aws_rds_cluster" "aurora" {
+  cluster_identifier = local.aurora_cluster_identifier
 
   # Motor y versión
-  engine         = "postgres"
-  engine_version = var.rds_engine_version
-  instance_class = var.rds_instance_class
-
-  # Almacenamiento
-  allocated_storage     = var.rds_allocated_storage
-  max_allocated_storage = var.rds_max_allocated_storage
-  storage_type          = "gp3"
-  storage_encrypted     = true
-  kms_key_id            = local.kms_key_arn
+  engine         = "aurora-postgresql"
+  engine_version = var.aurora_engine_version
+  engine_mode    = "provisioned"
 
   # Credenciales desde Secrets Manager
   username = jsondecode(data.aws_secretsmanager_secret_version.db_credentials.secret_string)["username"]
   password = jsondecode(data.aws_secretsmanager_secret_version.db_credentials.secret_string)["password"]
-  db_name  = jsondecode(data.aws_secretsmanager_secret_version.db_credentials.secret_string)["dbname"]
+  db_name   = jsondecode(data.aws_secretsmanager_secret_version.db_credentials.secret_string)["dbname"]
 
   # Red y seguridad
-  db_subnet_group_name   = aws_db_subnet_group.postgres.name
+  db_subnet_group_name   = aws_db_subnet_group.aurora.name
   vpc_security_group_ids = [local.sg_db_id]
-  publicly_accessible    = false
 
-  # Multi-AZ
-  multi_az = var.rds_multi_az
+  # Cifrado (PC-IAC-020)
+  storage_encrypted = true
+  kms_key_id        = local.kms_key_arn
 
-  # Parameter Group
-  parameter_group_name = aws_db_parameter_group.postgres.name
+  # Parameter Groups
+  db_cluster_parameter_group_name = aws_rds_cluster_parameter_group.aurora.name
 
   # Backups
-  backup_retention_period = var.rds_backup_retention_period
-  backup_window           = var.rds_backup_window
-  maintenance_window      = var.rds_maintenance_window
-  copy_tags_to_snapshot   = true
+  backup_retention_period      = var.aurora_backup_retention_period
+  preferred_backup_window      = var.aurora_backup_window
+  preferred_maintenance_window = var.aurora_maintenance_window
+  copy_tags_to_snapshot        = true
 
   # Enhanced Monitoring (PC-IAC-020)
-  enabled_cloudwatch_logs_exports = ["postgresql", "upgrade"]
-  monitoring_interval             = 60
-  monitoring_role_arn             = local.rds_monitoring_role_arn
+  enabled_cloudwatch_logs_exports = ["postgresql"]
+
+  # Protección
+  deletion_protection       = var.aurora_deletion_protection
+  skip_final_snapshot       = var.aurora_skip_final_snapshot
+  final_snapshot_identifier = var.aurora_skip_final_snapshot ? null : "${local.aurora_cluster_identifier}-final-snapshot-${formatdate("YYYY-MM-DD-hhmm", timestamp())}"
+
+  # Serverless v2 scaling configuration
+  serverlessv2_scaling_configuration {
+    min_capacity = var.aurora_serverless_min_capacity
+    max_capacity = var.aurora_serverless_max_capacity
+  }
+
+  tags = merge(
+    local.common_tags,
+    {
+      Name = local.aurora_cluster_identifier
+    }
+  )
+}
+
+# ============================================================================
+# Aurora PostgreSQL - Writer Instance (AZ-a)
+# ============================================================================
+
+resource "aws_rds_cluster_instance" "aurora_writer" {
+  identifier         = "${local.aurora_cluster_identifier}-writer"
+  cluster_identifier = aws_rds_cluster.aurora.id
+
+  # Instancia Serverless v2
+  instance_class = "db.serverless"
+  engine         = aws_rds_cluster.aurora.engine
+  engine_version = aws_rds_cluster.aurora.engine_version
+
+  # Subnet específica de AZ-a (primera subnet de datos)
+  availability_zone = data.aws_subnet.data_az_a.availability_zone
+
+  # Parameter Group
+  parameter_group_name = aws_db_parameter_group.aurora.name
+
+  # Enhanced Monitoring (PC-IAC-020)
+  monitoring_interval = 60
+  monitoring_role_arn = local.rds_monitoring_role_arn
 
   # Performance Insights
   performance_insights_enabled          = true
   performance_insights_kms_key_id       = local.kms_key_arn
   performance_insights_retention_period = 7
 
-  # Protección
-  deletion_protection       = var.rds_deletion_protection
-  skip_final_snapshot       = var.rds_skip_final_snapshot
-  final_snapshot_identifier = var.rds_skip_final_snapshot ? null : "${local.rds_identifier}-final-snapshot-${formatdate("YYYY-MM-DD-hhmm", timestamp())}"
-
   # Auto minor version upgrade
   auto_minor_version_upgrade = true
+
+  # Acceso público
+  publicly_accessible = false
 
   tags = merge(
     local.common_tags,
     {
-      Name = local.rds_identifier
+      Name = "${local.aurora_cluster_identifier}-writer"
+      Role = "Writer"
+      AZ   = data.aws_subnet.data_az_a.availability_zone
+    }
+  )
+}
+
+# ============================================================================
+# Aurora PostgreSQL - Reader Instance (AZ-b)
+# ============================================================================
+
+resource "aws_rds_cluster_instance" "aurora_reader" {
+  identifier         = "${local.aurora_cluster_identifier}-reader"
+  cluster_identifier = aws_rds_cluster.aurora.id
+
+  # Instancia Serverless v2
+  instance_class = "db.serverless"
+  engine         = aws_rds_cluster.aurora.engine
+  engine_version = aws_rds_cluster.aurora.engine_version
+
+  # Subnet específica de AZ-b (segunda subnet de datos)
+  availability_zone = data.aws_subnet.data_az_b.availability_zone
+
+  # Parameter Group
+  db_parameter_group_name = aws_db_parameter_group.aurora.name
+
+  # Enhanced Monitoring (PC-IAC-020)
+  monitoring_interval = 60
+  monitoring_role_arn = local.rds_monitoring_role_arn
+
+  # Performance Insights
+  performance_insights_enabled          = true
+  performance_insights_kms_key_id       = local.kms_key_arn
+  performance_insights_retention_period = 7
+
+  # Auto minor version upgrade
+  auto_minor_version_upgrade = true
+
+  # Acceso público
+  publicly_accessible = false
+
+  tags = merge(
+    local.common_tags,
+    {
+      Name = "${local.aurora_cluster_identifier}-reader"
+      Role = "Reader"
+      AZ   = data.aws_subnet.data_az_b.availability_zone
     }
   )
 }

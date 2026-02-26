@@ -1,40 +1,60 @@
 # ============================================================================
-# Outputs - RDS PostgreSQL
+# Outputs - Aurora PostgreSQL
 # ============================================================================
 
-output "rds_instance_id" {
-  description = "ID de la instancia RDS PostgreSQL"
-  value       = aws_db_instance.postgres.id
+output "aurora_cluster_id" {
+  description = "ID del cluster Aurora PostgreSQL"
+  value       = aws_rds_cluster.aurora.id
 }
 
-output "rds_instance_arn" {
-  description = "ARN de la instancia RDS PostgreSQL"
-  value       = aws_db_instance.postgres.arn
+output "aurora_cluster_arn" {
+  description = "ARN del cluster Aurora PostgreSQL"
+  value       = aws_rds_cluster.aurora.arn
 }
 
-output "rds_endpoint" {
-  description = "Endpoint de conexión de RDS PostgreSQL"
-  value       = aws_db_instance.postgres.endpoint
+output "aurora_cluster_endpoint" {
+  description = "Endpoint de escritura del cluster Aurora (Writer)"
+  value       = aws_rds_cluster.aurora.endpoint
 }
 
-output "rds_address" {
-  description = "Dirección DNS de RDS PostgreSQL"
-  value       = aws_db_instance.postgres.address
+output "aurora_reader_endpoint" {
+  description = "Endpoint de lectura del cluster Aurora (Reader)"
+  value       = aws_rds_cluster.aurora.reader_endpoint
 }
 
-output "rds_port" {
-  description = "Puerto de RDS PostgreSQL"
-  value       = aws_db_instance.postgres.port
+output "aurora_cluster_port" {
+  description = "Puerto del cluster Aurora PostgreSQL"
+  value       = aws_rds_cluster.aurora.port
 }
 
-output "rds_database_name" {
+output "aurora_database_name" {
   description = "Nombre de la base de datos"
-  value       = aws_db_instance.postgres.db_name
+  value       = aws_rds_cluster.aurora.database_name
 }
 
-output "rds_resource_id" {
-  description = "Resource ID de RDS (para IAM authentication)"
-  value       = aws_db_instance.postgres.resource_id
+output "aurora_cluster_resource_id" {
+  description = "Resource ID del cluster Aurora (para IAM authentication)"
+  value       = aws_rds_cluster.aurora.cluster_resource_id
+}
+
+output "aurora_writer_instance_id" {
+  description = "ID de la instancia writer de Aurora"
+  value       = aws_rds_cluster_instance.aurora_writer.id
+}
+
+output "aurora_writer_endpoint" {
+  description = "Endpoint de la instancia writer de Aurora"
+  value       = aws_rds_cluster_instance.aurora_writer.endpoint
+}
+
+output "aurora_reader_instance_id" {
+  description = "ID de la instancia reader de Aurora"
+  value       = aws_rds_cluster_instance.aurora_reader.id
+}
+
+output "aurora_reader_instance_endpoint" {
+  description = "Endpoint de la instancia reader de Aurora"
+  value       = aws_rds_cluster_instance.aurora_reader.endpoint
 }
 
 # ============================================================================
@@ -121,14 +141,32 @@ output "kms_key_arn" {
 output "data_infrastructure_summary" {
   description = "Resumen de la infraestructura de datos creada"
   value = {
-    rds_postgres = {
-      identifier     = aws_db_instance.postgres.identifier
-      endpoint       = aws_db_instance.postgres.endpoint
-      engine_version = aws_db_instance.postgres.engine_version
-      instance_class = aws_db_instance.postgres.instance_class
-      multi_az       = aws_db_instance.postgres.multi_az
-      encrypted      = aws_db_instance.postgres.storage_encrypted
-      monitoring     = "Enhanced Monitoring habilitado (60s)"
+    aurora_postgresql = {
+      cluster_identifier = aws_rds_cluster.aurora.cluster_identifier
+      writer_endpoint    = aws_rds_cluster.aurora.endpoint
+      reader_endpoint    = aws_rds_cluster.aurora.reader_endpoint
+      engine_version     = aws_rds_cluster.aurora.engine_version
+      engine_mode        = aws_rds_cluster.aurora.engine_mode
+      serverless_config = {
+        min_capacity = var.aurora_serverless_min_capacity
+        max_capacity = var.aurora_serverless_max_capacity
+      }
+      instances = {
+        writer = {
+          id                = aws_rds_cluster_instance.aurora_writer.id
+          endpoint          = aws_rds_cluster_instance.aurora_writer.endpoint
+          availability_zone = aws_rds_cluster_instance.aurora_writer.availability_zone
+          role              = "Writer"
+        }
+        reader = {
+          id                = aws_rds_cluster_instance.aurora_reader.id
+          endpoint          = aws_rds_cluster_instance.aurora_reader.endpoint
+          availability_zone = aws_rds_cluster_instance.aurora_reader.availability_zone
+          role              = "Reader"
+        }
+      }
+      encrypted  = aws_rds_cluster.aurora.storage_encrypted
+      monitoring = "Enhanced Monitoring habilitado (60s)"
     }
     elasticache_redis = {
       cluster_id     = aws_elasticache_cluster.redis.cluster_id

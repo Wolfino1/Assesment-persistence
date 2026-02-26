@@ -32,9 +32,10 @@ locals {
   rds_monitoring_role_arn = var.rds_monitoring_role_arn != "" ? var.rds_monitoring_role_arn : data.aws_iam_role.rds_monitoring[0].arn
 
   # Nombres de recursos
-  rds_identifier           = "${local.governance_prefix}-postgres"
-  rds_subnet_group_name    = "${local.governance_prefix}-rds-subnet-group"
-  rds_parameter_group_name = "${local.governance_prefix}-postgres-params"
+  aurora_cluster_identifier           = "${local.governance_prefix}-aurora"
+  aurora_subnet_group_name            = "${local.governance_prefix}-aurora-subnet-group"
+  aurora_cluster_parameter_group_name = "${local.governance_prefix}-aurora-cluster-params"
+  aurora_db_parameter_group_name      = "${local.governance_prefix}-aurora-db-params"
 
   elasticache_cluster_id           = "${local.governance_prefix}-redis"
   elasticache_subnet_group_name    = "${local.governance_prefix}-redis-subnet-group"

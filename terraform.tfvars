@@ -24,19 +24,17 @@ region      = "us-east-1"
 # rds_monitoring_role_arn = ""  # Se detecta automáticamente
 
 # ============================================================================
-# Configuración de RDS PostgreSQL
+# Configuración de Aurora PostgreSQL Serverless v2
 # ============================================================================
 
-rds_instance_class          = "db.t4g.micro" # Capacidad mínima
-rds_allocated_storage       = 20
-rds_max_allocated_storage   = 100
-rds_engine_version          = "16.3"
-rds_multi_az                = true
-rds_backup_retention_period = 7
-rds_backup_window           = "03:00-04:00"
-rds_maintenance_window      = "mon:04:00-mon:05:00"
-rds_deletion_protection     = true
-rds_skip_final_snapshot     = false
+aurora_engine_version           = "16.4"
+aurora_serverless_min_capacity  = 0.5 # Mínimo 0.5 ACU
+aurora_serverless_max_capacity  = 1.0 # Máximo 1.0 ACU (ajustar según necesidad)
+aurora_backup_retention_period  = 7
+aurora_backup_window            = "03:00-04:00"
+aurora_maintenance_window       = "mon:04:00-mon:05:00"
+aurora_deletion_protection      = true
+aurora_skip_final_snapshot      = false
 
 # ============================================================================
 # Configuración de ElastiCache Redis
