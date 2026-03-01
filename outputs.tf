@@ -30,6 +30,7 @@ output "aurora_cluster_port" {
 output "aurora_database_name" {
   description = "Nombre de la base de datos"
   value       = aws_rds_cluster.aurora.database_name
+  sensitive   = true
 }
 
 output "aurora_cluster_resource_id" {

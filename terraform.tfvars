@@ -61,7 +61,7 @@ s3_glacier_transition_days = 30
 # ============================================================================
 
 additional_tags = {
-  Owner      = "santiago.guerrero"
+  owner      = "santiago.guerrero"
   CostCenter = "0000"
   Purpose    = "Data Infrastructure"
 }

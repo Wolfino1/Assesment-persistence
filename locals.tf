@@ -3,8 +3,8 @@
 # ============================================================================
 
 locals {
-  # Prefijo de gobernanza (PC-IAC-003)
-  governance_prefix = "${var.client}-${var.project}-${var.environment}"
+  # Prefijo de gobernanza (PC-IAC-003) - convertido a minúsculas
+  governance_prefix = lower("${var.client}-${var.project}-${var.environment}")
 
   # Tags comunes obligatorios (PC-IAC-004)
   common_tags = merge(

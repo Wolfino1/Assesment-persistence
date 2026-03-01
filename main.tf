@@ -14,7 +14,8 @@ terraform {
 }
 
 provider "aws" {
-  region = var.region
+  region  = var.region
+  profile = "pra_chaptercloudops_lab"
 }
 
 # ============================================================================
@@ -77,7 +78,7 @@ data "aws_security_group" "db" {
 data "aws_kms_key" "selected" {
   count = var.kms_key_arn == "" ? 1 : 0
 
-  key_id = "alias/${var.client}-${var.project}-${var.environment}-key"
+  key_id = "alias/pragma-Assesment-dev-cmk"
 }
 
 # Buscar Secret de base de datos
@@ -91,7 +92,7 @@ data "aws_secretsmanager_secret" "db" {
 data "aws_iam_role" "rds_monitoring" {
   count = var.rds_monitoring_role_arn == "" ? 1 : 0
 
-  name = "${var.client}-${var.project}-${var.environment}-rds-monitoring-role"
+  name = "pragma-Assesment-dev-role-rds-monitoring"
 }
 
 # Obtener credenciales del secreto
@@ -181,9 +182,9 @@ resource "aws_rds_cluster" "aurora" {
   engine_mode    = "provisioned"
 
   # Credenciales desde Secrets Manager
-  username = jsondecode(data.aws_secretsmanager_secret_version.db_credentials.secret_string)["username"]
-  password = jsondecode(data.aws_secretsmanager_secret_version.db_credentials.secret_string)["password"]
-  db_name   = jsondecode(data.aws_secretsmanager_secret_version.db_credentials.secret_string)["dbname"]
+  master_username = jsondecode(data.aws_secretsmanager_secret_version.db_credentials.secret_string)["username"]
+  master_password = jsondecode(data.aws_secretsmanager_secret_version.db_credentials.secret_string)["password"]
+  database_name   = jsondecode(data.aws_secretsmanager_secret_version.db_credentials.secret_string)["dbname"]
 
   # Red y seguridad
   db_subnet_group_name   = aws_db_subnet_group.aurora.name
@@ -241,7 +242,7 @@ resource "aws_rds_cluster_instance" "aurora_writer" {
   availability_zone = data.aws_subnet.data_az_a.availability_zone
 
   # Parameter Group
-  parameter_group_name = aws_db_parameter_group.aurora.name
+  db_parameter_group_name = aws_db_parameter_group.aurora.name
 
   # Enhanced Monitoring (PC-IAC-020)
   monitoring_interval = 60
